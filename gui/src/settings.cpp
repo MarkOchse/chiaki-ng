@@ -987,6 +987,15 @@ void Settings::SetKeyboardEnabled(bool enabled)
 	settings.setValue("settings/keyboard_enabled", enabled);
 }
 
+bool Settings::GetRemoteInputEnabled() const
+{
+	return settings.value("settings/remote_input_enabled", false).toBool();
+}
+void Settings::SetRemoteInputEnabled(bool enabled)
+{
+	settings.setValue("settings/remote_input_enabled", enabled);
+}
+
 bool Settings::GetMouseTouchEnabled() const
 {
 	return settings.value("settings/mouse_touch_enabled", true).toBool();

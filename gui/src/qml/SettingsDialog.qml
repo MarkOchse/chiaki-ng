@@ -2408,6 +2408,19 @@ DialogView {
                                 }
                             }
                         }
+                        CheckBox {
+                            text: qsTr("Remote input (localhost 47001 in / 47002 out)")
+                            checked: Chiaki.settings.remoteInputEnabled
+                            onToggled: Chiaki.settings.remoteInputEnabled = checked
+                            Layout.alignment: Qt.AlignRight
+                            property bool firstInFocusChain: false
+                            property bool lastInFocusChain: false
+                            Material.roundedScale: Material.SmallScale
+                            Material.background: visualFocus ? Material.accent : undefined
+                            onActiveFocusChanged: if (activeFocus) keysFlick.ensureItemVisible(this)
+                        }
+                        Item { Layout.fillWidth: true }
+                        Item { Layout.fillWidth: true }
                         Repeater {
                             id: chiakiKeys
                             model: Chiaki.settings.controllerMapping

@@ -42,6 +42,7 @@
 #include <QThread>
 #include <QWaitCondition>
 #include <QAtomicInteger>
+#include <QUdpSocket>
 #if CHIAKI_GUI_ENABLE_SPEEX
 #include <QQueue>
 #include <speex/speex_echo.h>
@@ -94,6 +95,7 @@ class SdeckHapticsWorker;
 		bool stretch;
 		bool enable_keyboard;
 		bool keyboard_controller_enabled;
+		bool remote_input_enabled = false;
 		bool mouse_touch_enabled;
 		bool enable_dualsense;
 		bool auto_regist;
@@ -224,6 +226,14 @@ class StreamSession : public QObject
 		QMap<int, uint8_t> touch_tracker;
 		int8_t mouse_touch_id;
 		ChiakiControllerState dpad_touch_state;
+		// Remote input: external process sends controller state on 127.0.0.1:47001,
+		// final merged state sent to the console is mirrored to 127.0.0.1:47002.
+		ChiakiControllerState remote_state;
+		QUdpSocket *remote_socket;
+		QTimer *remote_watchdog;
+		QElapsedTimer remote_clock;
+		bool remote_has_last_out;
+		ChiakiControllerState remote_last_out;
 		uint16_t dpad_touch_increment;
 		float trigger_override;
 		float haptic_override;
@@ -404,6 +414,8 @@ class StreamSession : public QObject
 		void UpdateGamepads();
 		void DpadSendFeedbackState();
 		void SendFeedbackState();
+		void PushControllerState(ChiakiControllerState *state);
+		void RemoteInputReadyRead();
 };
 
 Q_DECLARE_METATYPE(ChiakiQuitReason)

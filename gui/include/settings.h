@@ -440,6 +440,9 @@ class Settings : public QObject
 		bool GetKeyboardEnabled() const;
 		void SetKeyboardEnabled(bool enabled);
 
+		bool GetRemoteInputEnabled() const;
+		void SetRemoteInputEnabled(bool enabled);
+
 		bool GetMouseTouchEnabled() const;
 		void SetMouseTouchEnabled(bool enabled);
 

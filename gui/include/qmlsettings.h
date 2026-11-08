@@ -82,6 +82,7 @@ class QmlSettings : public QObject
     Q_PROPERTY(QString psnAccountId READ psnAccountId WRITE setPsnAccountId NOTIFY psnAccountIdChanged)
     Q_PROPERTY(bool mouseTouchEnabled READ mouseTouchEnabled WRITE setMouseTouchEnabled NOTIFY mouseTouchEnabledChanged)
     Q_PROPERTY(bool keyboardEnabled READ keyboardEnabled WRITE setKeyboardEnabled NOTIFY keyboardEnabledChanged)
+    Q_PROPERTY(bool remoteInputEnabled READ remoteInputEnabled WRITE setRemoteInputEnabled NOTIFY remoteInputEnabledChanged)
     Q_PROPERTY(bool dpadTouchEnabled READ dpadTouchEnabled WRITE setDpadTouchEnabled NOTIFY dpadTouchEnabledChanged)
     Q_PROPERTY(bool iDROnFECFailureEnabled READ iDROnFECFailureEnabled WRITE setIDROnFECFailureEnabled NOTIFY iDROnFECFailureEnabledChanged)
     Q_PROPERTY(uint16_t dpadTouchIncrement READ dpadTouchIncrement WRITE setDpadTouchIncrement NOTIFY dpadTouchIncrementChanged)
@@ -550,6 +551,9 @@ public:
     bool keyboardEnabled() const;
     void setKeyboardEnabled(bool enabled);
 
+    bool remoteInputEnabled() const;
+    void setRemoteInputEnabled(bool enabled);
+
     bool dpadTouchEnabled() const;
     void setDpadTouchEnabled(bool enabled);
 
@@ -682,6 +686,7 @@ signals:
     void psnAccountIdChanged();
     void mouseTouchEnabledChanged();
     void keyboardEnabledChanged();
+    void remoteInputEnabledChanged();
     void dpadTouchEnabledChanged();
     void dpadTouchIncrementChanged();
     void dpadTouchShortcut1Changed();

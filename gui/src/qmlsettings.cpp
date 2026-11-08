@@ -820,6 +820,17 @@ void QmlSettings::setKeyboardEnabled(bool enabled)
     emit keyboardEnabledChanged();
 }
 
+bool QmlSettings::remoteInputEnabled() const
+{
+    return settings->GetRemoteInputEnabled();
+}
+
+void QmlSettings::setRemoteInputEnabled(bool enabled)
+{
+    settings->SetRemoteInputEnabled(enabled);
+    emit remoteInputEnabledChanged();
+}
+
 bool QmlSettings::dpadTouchEnabled() const
 {
     return settings->GetDpadTouchEnabled();
@@ -1948,6 +1959,7 @@ void QmlSettings::refreshAllKeys()
     emit psnAccountIdChanged();
     emit mouseTouchEnabledChanged();
     emit keyboardEnabledChanged();
+    emit remoteInputEnabledChanged();
     emit dpadTouchEnabledChanged();
     emit iDROnFECFailureEnabledChanged();
     emit dpadTouchIncrementChanged();

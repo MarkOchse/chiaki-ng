@@ -14,6 +14,8 @@
 #include <QKeyEvent>
 #include <QMutexLocker>
 #include <QtMath>
+#include <QtEndian>
+#include <QHostAddress>
 #include <atomic>
 
 #include <algorithm>
@@ -36,6 +38,11 @@
 #define PS5_TOUCHPAD_MAX_X 1919.0f
 #define PS5_TOUCHPAD_MAX_Y 1079.0f
 #define SESSION_RETRY_SECONDS 20
+#define REMOTE_INPUT_PORT 47001
+#define REMOTE_OUTPUT_PORT 47002
+#define REMOTE_INPUT_TIMEOUT_MS 250
+#define REMOTE_INPUT_PACKET_SIZE 20
+#define REMOTE_OUTPUT_PACKET_SIZE 28
 #define HAPTIC_RUMBLE_MIN_STRENGTH 100
 
 #define MICROPHONE_SAMPLES 480
@@ -302,6 +309,7 @@ StreamSessionConnectInfo::StreamSessionConnectInfo(
 	this->stretch = stretch;
 	const bool keyboard_controller_enabled_setting = settings->GetKeyboardEnabled();
 	this->keyboard_controller_enabled = keyboard_controller_enabled_setting;
+	this->remote_input_enabled = settings->GetRemoteInputEnabled();
 	this->mouse_touch_enabled = settings->GetMouseTouchEnabled();
 	this->enable_keyboard = false;
 	this->enable_dualsense = true;
@@ -518,6 +526,31 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	mouse_touch_id=-1;
 	dpad_touch_id =-1;
 	chiaki_controller_state_set_idle(&dpad_touch_state);
+	chiaki_controller_state_set_idle(&remote_state);
+	chiaki_controller_state_set_idle(&remote_last_out);
+	remote_has_last_out = false;
+	remote_socket = nullptr;
+	remote_watchdog = nullptr;
+	remote_clock.start();
+	if(connect_info.remote_input_enabled)
+	{
+		remote_socket = new QUdpSocket(this);
+		if(remote_socket->bind(QHostAddress::LocalHost, REMOTE_INPUT_PORT))
+		{
+			connect(remote_socket, &QUdpSocket::readyRead, this, &StreamSession::RemoteInputReadyRead);
+			CHIAKI_LOGI(GetChiakiLog(), "Remote input listening on 127.0.0.1:%d, mirroring state to 127.0.0.1:%d", REMOTE_INPUT_PORT, REMOTE_OUTPUT_PORT);
+		}
+		else
+			CHIAKI_LOGE(GetChiakiLog(), "Remote input failed to bind 127.0.0.1:%d: %s", REMOTE_INPUT_PORT, remote_socket->errorString().toUtf8().constData());
+		remote_watchdog = new QTimer(this);
+		remote_watchdog->setSingleShot(true);
+		remote_watchdog->setInterval(REMOTE_INPUT_TIMEOUT_MS);
+		connect(remote_watchdog, &QTimer::timeout, this, [this]{
+			// sender went quiet: release everything so nothing stays held
+			chiaki_controller_state_set_idle(&remote_state);
+			SendFeedbackState();
+		});
+	}
 	dpad_touch_value = QPair<uint16_t, uint16_t>(0,0);
 	dpad_touch_increment = connect_info.dpad_touch_increment;
 	dpad_touch_timer = new QTimer(this);
@@ -1317,7 +1350,7 @@ void StreamSession::DpadSendFeedbackState()
 			dpad_touch_stop_timer->start(NEW_DPAD_TOUCH_INTERVAL_MS);
 	}
 	chiaki_controller_state_or(&state, &state, &dpad_touch_state);
-	chiaki_session_set_controller_state(&session, &state);
+	PushControllerState(&state);
 }
 
 void StreamSession::SendFeedbackState()
@@ -1373,7 +1406,79 @@ void StreamSession::SendFeedbackState()
 			dpad_touch_stop_timer->start(NEW_DPAD_TOUCH_INTERVAL_MS);
 	}
 	chiaki_controller_state_or(&state, &state, &dpad_touch_state);
-	chiaki_session_set_controller_state(&session, &state);
+	PushControllerState(&state);
+}
+
+// ---- Remote input / state mirror -------------------------------------------
+// Input packet (to 127.0.0.1:47001), 20 bytes little-endian:
+//   char magic[4] = "CKI1"; uint32 buttons; uint8 l2; uint8 r2;
+//   int16 left_x, left_y, right_x, right_y; uint16 reserved
+// Output packet (to 127.0.0.1:47002), 28 bytes little-endian, sent whenever
+// the state sent to the console changes:
+//   char magic[4] = "CKO1"; uint64 t_us (monotonic); uint32 buttons;
+//   uint8 l2; uint8 r2; int16 left_x, left_y, right_x, right_y; uint16 reserved
+// Buttons use the ChiakiControllerButton bit values.
+
+void StreamSession::RemoteInputReadyRead()
+{
+	bool changed = false;
+	while(remote_socket && remote_socket->hasPendingDatagrams())
+	{
+		QByteArray buf;
+		buf.resize(int(remote_socket->pendingDatagramSize()));
+		QHostAddress from;
+		remote_socket->readDatagram(buf.data(), buf.size(), &from);
+		if(buf.size() < REMOTE_INPUT_PACKET_SIZE || memcmp(buf.constData(), "CKI1", 4) != 0)
+			continue;
+		const uchar *d = reinterpret_cast<const uchar *>(buf.constData());
+		remote_state.buttons = qFromLittleEndian<quint32>(d + 4);
+		remote_state.l2_state = d[8];
+		remote_state.r2_state = d[9];
+		remote_state.left_x = qFromLittleEndian<qint16>(d + 10);
+		remote_state.left_y = qFromLittleEndian<qint16>(d + 12);
+		remote_state.right_x = qFromLittleEndian<qint16>(d + 14);
+		remote_state.right_y = qFromLittleEndian<qint16>(d + 16);
+		changed = true;
+	}
+	if(changed)
+	{
+		if(remote_watchdog)
+			remote_watchdog->start();
+		SendFeedbackState();
+	}
+}
+
+void StreamSession::PushControllerState(ChiakiControllerState *state)
+{
+	if(remote_socket)
+	{
+		chiaki_controller_state_or(state, state, &remote_state);
+		const bool same = remote_has_last_out
+			&& state->buttons == remote_last_out.buttons
+			&& state->l2_state == remote_last_out.l2_state
+			&& state->r2_state == remote_last_out.r2_state
+			&& state->left_x == remote_last_out.left_x
+			&& state->left_y == remote_last_out.left_y
+			&& state->right_x == remote_last_out.right_x
+			&& state->right_y == remote_last_out.right_y;
+		if(!same)
+		{
+			uchar out[REMOTE_OUTPUT_PACKET_SIZE] = {};
+			memcpy(out, "CKO1", 4);
+			qToLittleEndian<quint64>(quint64(remote_clock.nsecsElapsed() / 1000), out + 4);
+			qToLittleEndian<quint32>(quint32(state->buttons), out + 12);
+			out[16] = state->l2_state;
+			out[17] = state->r2_state;
+			qToLittleEndian<qint16>(state->left_x, out + 18);
+			qToLittleEndian<qint16>(state->left_y, out + 20);
+			qToLittleEndian<qint16>(state->right_x, out + 22);
+			qToLittleEndian<qint16>(state->right_y, out + 24);
+			remote_socket->writeDatagram(reinterpret_cast<const char *>(out), REMOTE_OUTPUT_PACKET_SIZE, QHostAddress::LocalHost, REMOTE_OUTPUT_PORT);
+			remote_last_out = *state;
+			remote_has_last_out = true;
+		}
+	}
+	chiaki_session_set_controller_state(&session, state);
 }
 
 void StreamSession::InitAudio(unsigned int channels, unsigned int rate)
